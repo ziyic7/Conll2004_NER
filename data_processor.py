@@ -107,7 +107,8 @@ class DataProcessor:
 		features = []
 		labels = []
 		for example in examples:
-			ids = [vocab.token_to_id[tok] for tok in example.tokens]
+			ids = [vocab.token_to_id[tok] if tok in vocab.token_to_id
+				else vocab.token_to_id["<UNK>"] for tok in example.tokens]
 			label = [self.label_to_id[lbl] for lbl in example.label]
 			features.append(ids)
 			labels.append(label)
@@ -145,4 +146,3 @@ class InputExample:
 		self.tokens = tokens
 		self.label = label
 		self.relations = relations
-

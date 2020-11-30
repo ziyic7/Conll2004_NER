@@ -179,9 +179,9 @@ def main(args):
 
 	if args.with_crf:
 		logger.info("Running %s" % "BiLSTM+CRF")
-		model = BiLSTM_CRF(weight_matrix, 10, data_processor.label_to_id, "<START>", "<STOP>")
+		model = BiLSTM_CRF(weight_matrix, args.hidden_size, data_processor.label_to_id, "<START>", "<STOP>")
 	else:
-		model = BiLSTM(weight_matrix, 20, 7)
+		model = BiLSTM(weight_matrix, args.hidden_size, args.num_of_tags)
 		logger.info("Running %s" % "BiLSTM")
 
 	model.to(device)
@@ -236,25 +236,31 @@ def main(args):
 					if max_score:
 						with open(os.path.join(args.output_dir, "eval_results.txt"), "w") as writer:
 							writer.write("Best eval result: F1 = %.4f" % max_score)
-	# if True:
-	# 	[test_examples], _ = data_processor.get_conll_examples(do_training=False)
-	# 	test_features, test_label = data_processor.convert_example_to_features(test_examples, vocabulary)
-	# 	test_data = TensorDataset(test_features, test_label)
-	# 	test_dataloader = DataLoader(test_data, batch_size=args.batch_size)
-	#
-	# 	model = BiLSTM(weight_matrix, 20, 7)
-	# 	model.load_state_dict(torch.load(os.path.join(args.output_dir, "pytorch_model.bin")))
-	#
-	# 	eval_result_file = os.path.join(args.output_dir, "eval_results.txt")
-	# 	if os.path.isfile(eval_result_file):
-	# 		with open(eval_result_file) as f:
-	# 			line = f.readline()
-	# 		logger.info(line)
-	# 		f.close()
-	#
-	# 	test_score = evaluate(model, device, test_label, test_dataloader)
-	# 	result = "test result: F1 = %.6f" % test_score
-	# 	logger.info(result)
+	if args.do_eval:
+		[test_examples], _ = data_processor.get_conll_examples(do_training=False)
+		test_features, test_label = data_processor.convert_example_to_features(test_examples, vocabulary)
+		test_data = TensorDataset(test_features, test_label)
+		test_dataloader = DataLoader(test_data, batch_size=args.batch_size)
+
+		if args.with_crf:
+			model = BiLSTM_CRF(weight_matrix, args.hidden_size, data_processor.label_to_id, "<START>", "<STOP>")
+		else:
+			model = BiLSTM(weight_matrix, args.hidden_size, args.num_of_tags)
+
+		model.load_state_dict(torch.load(os.path.join(args.output_dir, "pytorch_model.bin")))
+		model.eval()
+		model = model.to(device)
+
+		eval_result_file = os.path.join(args.output_dir, "eval_results.txt")
+		if os.path.isfile(eval_result_file):
+			with open(eval_result_file) as f:
+				line = f.readline()
+			logger.info(line)
+			f.close()
+
+		test_score = evaluate(args, model, device, test_label, test_dataloader)
+		result = "test result: F1 = %.6f" % test_score
+		logger.info(result)
 
 
 if __name__ == "__main__":
@@ -287,11 +293,14 @@ if __name__ == "__main__":
 	parser.add_argument("--do_eval", action="store_true", help="Do eval and test.")
 	parser.add_argument("--with_crf", action="store_true", help="Use BiLSTM_CRF model.")
 	parser.add_argument("--batch_size", default=8, type=int, help="Batch size for training.")
+	parser.add_argument("--hidden_size", default=20, type=int, help="Hidden size for lstm.")
+	parser.add_argument("--num_of_tags", default=7, type=int, help="Number of meaningful tags.")
 	parser.add_argument(
 		"--num_train_epochs", default=50, type=float, help="Total number of training epochs to perform."
 	)
 	parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
 	args = parser.parse_args()
+
 	if not os.path.exists(args.output_dir):
 		os.makedirs(args.output_dir)
 
