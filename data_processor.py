@@ -6,10 +6,18 @@ import numpy as np
 import torch
 
 
+def true_len(tokens):
+	length = 0
+	for i in range(len(tokens)):
+		if tokens[i] != "<PAD>":
+			length += 1
+	return length
+
+
 class Vocabulary:
 	def __init__(self):
-		self.token_to_id = {"<PAD>": 0}
-		self.id_to_token = {0: "<PAD>"}
+		self.token_to_id = {"<PAD>": 0, "<UNK>": 1}
+		self.id_to_token = {0: "<PAD>", 1: "<UNK>"}
 
 	def build(self, tokens):
 		for token in tokens:
@@ -28,7 +36,17 @@ class DataProcessor:
 		self.dev_file = dev_file
 		self.test_file = test_file
 		self.type_to_label = {"Peop": "PER", "Org": "ORG", "Loc": "LOC", "Other": "O"}
-		self.label_to_id = {"B-PER": 0, "I-PER": 1, "B-ORG": 2, "I-ORG": 3, "B-LOC": 4, "I-LOC": 5, "O": 6}
+		self.label_to_id = {
+			"<PAD>": 0,
+			"B-PER": 1,
+			"I-PER": 2,
+			"B-ORG": 3,
+			"I-ORG": 4,
+			"B-LOC": 5,
+			"I-LOC": 6,
+			"O": 7,
+			"<START>": 8,
+			"<STOP>": 9}
 
 	def get_conll_examples(self, do_training=True):
 		conll_examples = []
@@ -44,21 +62,27 @@ class DataProcessor:
 			examples = []
 			print(filename[i])
 			with open(filename[i], "r", encoding="utf-8") as reader:
-				data = json.load(reader)
+				dataset = json.load(reader)
 			reader.close()
 
-			for data in data:
+			for data in dataset:
 				tokens = data["tokens"]
-				entities = data["entities"]
-				relations = data["relations"]
-				orig_id = data["orig_id"]
-
 				vocab.build(tokens)
 				token_len = len(tokens)
 				if token_len > self.max_seq_len:
 					self.max_seq_len = token_len
 
-				label = [self.type_to_label["Other"]] * token_len
+			for data in dataset:
+				tokens = data["tokens"]
+				entities = data["entities"]
+				relations = data["relations"]
+				orig_id = data["orig_id"]
+
+				token_len = len(tokens)
+				while len(tokens) < self.max_seq_len:
+					tokens.append("<PAD>")
+
+				label = [self.type_to_label["Other"]] * token_len + ["<PAD>"] * (self.max_seq_len - token_len)
 				for entity in entities:
 					if entity["type"] == "Other":
 						continue
@@ -79,14 +103,12 @@ class DataProcessor:
 		return conll_examples, vocab
 
 	def convert_example_to_features(self, examples, vocab):
+		examples = sorted(examples, key=lambda x: true_len(x.tokens), reverse=True)
 		features = []
 		labels = []
 		for example in examples:
 			ids = [vocab.token_to_id[tok] for tok in example.tokens]
 			label = [self.label_to_id[lbl] for lbl in example.label]
-			pad_len = self.max_seq_len - len(ids)
-			ids.extend([0] * pad_len)
-			label.extend([-1] * pad_len)
 			features.append(ids)
 			labels.append(label)
 
@@ -108,7 +130,7 @@ class DataProcessor:
 			try:
 				weights_matrix[i] = glove[word]
 				words_found += 1
-			except KeyError:
+			except KeyError:  # <PAD> <UNK> and unknown words in training & dev set
 				weights_matrix[i] = np.random.normal(scale=0.6, size=(50,))
 		return weights_matrix
 
