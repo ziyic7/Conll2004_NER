@@ -20,23 +20,23 @@ class BiLSTM(nn.Module):
 		self.embedding, vocab_size, embedding_dim = self.init_embed_layer(weight_matrix)
 		self.hidden_size = hidden_size
 		self.lstm = nn.LSTM(embedding_dim, hidden_size, num_layers=1, bidirectional=True)
-		self.hidden_to_tag = nn.Linear(2 * hidden_size, number_of_tags)  # double the hidden size because bi-directional
+		self.hidden_to_tag = nn.Linear(2 * hidden_size, number_of_tags)
 
-	def init_embed_layer(self, weight_matrix, do_training=False):
+	def init_embed_layer(self, weight_matrix, do_training=True):
 		"""
 		:param weight_matrix: matrix compacted by pre-trained glove vectors
 		:param do_training: to train the word vectors
 		"""
 		vocab_size, embedding_dim = weight_matrix.shape
 		embedding_layer = nn.Embedding(vocab_size, embedding_dim)
-		embedding_layer.from_pretrained(torch.FloatTensor(weight_matrix))  # load the pre-trained
+		embedding_layer.from_pretrained(torch.from_numpy(weight_matrix))  # load the pre-trained
 		if not do_training:
 			embedding_layer.weight.requires_grad = False
 		return embedding_layer, vocab_size, embedding_dim
 
 	def forward(self, x):
 		self.lstm.flatten_parameters()
-		embedding = self.embedding(x).permute(1, 0, 2)
+		embedding = self.embedding(x)
 		output, _ = self.lstm(embedding)  # (seq_len, batch_sz, embedding_dim)->(seq_len, batch_sz, 2 * hidden_sz)
 		output = output.view(-1, output.shape[2])  # ->(batch_sz * seq_len, 2 * hidden_sz)
 		logits = self.hidden_to_tag(output)  # ->(batch_sz * seq_len, num_of_tags)
@@ -64,14 +64,14 @@ class BiLSTM_CRF(nn.Module):
 		self.transitions.data[label_to_id[start_tag], :] = -10000
 		self.transitions.data[:, label_to_id[stop_tag]] = -10000
 
-	def init_embed_layer(self, weight_matrix, do_training=False):
+	def init_embed_layer(self, weight_matrix, do_training=True):
 		"""
 		:param weight_matrix: matrix compacted by pre-trained glove vectors
 		:param do_training: to train the word vectors
 		"""
 		vocab_size, embedding_dim = weight_matrix.shape
 		embedding_layer = nn.Embedding(vocab_size, embedding_dim)
-		embedding_layer.from_pretrained(torch.FloatTensor(weight_matrix))  # load the pre-trained
+		embedding_layer.from_pretrained(torch.from_numpy(weight_matrix))  # load the pre-trained
 		if not do_training:
 			embedding_layer.weight.requires_grad = False
 		return embedding_layer, vocab_size, embedding_dim
@@ -100,14 +100,13 @@ class BiLSTM_CRF(nn.Module):
 		return d
 
 	def _get_lstm_features(self, sentences):
-		embeds = self.word_embeds(sentences).permute(1, 0, 2)
+		embeds = self.word_embeds(sentences)
 		lstm_out, self.hidden = self.lstm(embeds)
-		lstm_out = lstm_out.permute(1, 0, 2)
+		lstm_out = lstm_out
 		lstm_feats = self.hidden2tag(lstm_out)
-		return lstm_feats
+		return F.log_softmax(lstm_feats, dim=2)
 
 	def _score_sentence(self, feats, tags, mask):
-
 		score = torch.gather(feats, dim=2, index=tags.unsqueeze(dim=2)).squeeze(dim=2).to("cuda")
 		score[:, 1:] += self.transitions[tags[:, :-1], tags[:, 1:]]
 		total_score = (score * mask.type(torch.float)).sum(dim=1)

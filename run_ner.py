@@ -5,7 +5,7 @@ import os
 
 import numpy as np
 import torch
-from torch.optim import SGD
+from torch.optim import Adam
 from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
 
@@ -47,7 +47,7 @@ def find_all_tags(predictions, dev_mask):
 			per_pos = idx
 			length = 0  # number of I-PER
 			seek = idx + 1
-			while predictions[seek] == 1:  # I-PER
+			while seek < len(predictions) and predictions[seek] == 1:  # I-PER
 				length += 1
 				seek += 1
 			idx += (length + 1)
@@ -56,7 +56,7 @@ def find_all_tags(predictions, dev_mask):
 			org_pos = idx
 			length = 0
 			seek = idx + 1
-			while predictions[seek] == 3:
+			while seek < len(predictions) and predictions[seek] == 3:
 				length += 1
 				seek += 1
 			idx += (length + 1)
@@ -65,7 +65,7 @@ def find_all_tags(predictions, dev_mask):
 			loc_pos = idx
 			length = 0
 			seek = idx + 1
-			while predictions[seek] == 5:
+			while seek < len(predictions) and predictions[seek] == 5:
 				length += 1
 				seek += 1
 			idx += (length + 1)
@@ -81,7 +81,11 @@ def precision(predictions, dev_labels, dev_mask):
 	for tag_name in result:
 		for res in result[tag_name]:
 			if (predictions[res[0]:res[0] + res[1] + 1] == dev_labels[res[0]:res[0] + res[1] + 1]).all():
-				pre.append(1)
+				if (res[0] + res[1]) < (len(predictions) - 1) and \
+						predictions[res[0] + res[1]] == predictions[res[0] + res[1] + 1]:
+					pre.append(0)
+				else:
+					pre.append(1)
 			else:
 				pre.append(0)
 	if len(pre) == 0:
@@ -95,7 +99,11 @@ def recall(predictions, dev_labels, dev_mask):
 	for tag_name in result:
 		for res in result[tag_name]:
 			if (predictions[res[0]:res[0] + res[1] + 1] == dev_labels[res[0]:res[0] + res[1] + 1]).all():
-				rec.append(1)
+				if (res[0] + res[1]) < (len(predictions) - 1) and \
+						predictions[res[0] + res[1]] == predictions[res[0] + res[1] + 1]:
+					rec.append(0)
+				else:
+					rec.append(1)
 			else:
 				rec.append(0)
 	if len(rec) == 0:
@@ -120,7 +128,7 @@ def compute_f1(predictions, dev_labels, dev_mask):
 def evaluate(args, model, device, dev_labels, dev_dataloader):
 	model.eval()
 	seq_len = dev_labels.size(1)
-	all_predictions = torch.tensor([]).to(device)
+	all_predictions = torch.tensor([], dtype=torch.float).to(device)
 	all_predictions_arr = []
 	dev_batches = [batch for batch in dev_dataloader]
 
@@ -138,7 +146,10 @@ def evaluate(args, model, device, dev_labels, dev_dataloader):
 							all_predictions_arr.append(-1)
 			else:
 				outputs = model(dev_ids)
-				predicted_lbl = torch.argmax(outputs, dim=1)  # make predictions
+				# print(outputs)
+				# print(outputs.size())
+				predicted_lbl = torch.argmax(outputs, dim=1)
+				predicted_lbl = predicted_lbl.type(torch.float)
 				all_predictions = torch.cat((all_predictions, predicted_lbl), dim=0)
 
 	if args.with_crf:
@@ -188,7 +199,7 @@ def main(args):
 	if n_gpu > 1 and not args.with_crf:
 		model = torch.nn.DataParallel(model)
 
-	optimizer = SGD(model.parameters(), lr=0.01, weight_decay=1e-4)
+	optimizer = Adam(model.parameters(), lr=0.01, weight_decay=0.)
 
 	tr_loss = 0
 	tr_num_steps = 0
@@ -222,6 +233,7 @@ def main(args):
 				save_model = False
 				if args.do_eval:
 					score = evaluate(args, model, device, dev_label, dev_dataloader)
+					print("F1 score: %.6f" % score)
 					model.train()
 					if score > max_score:
 						max_score = score
@@ -292,11 +304,11 @@ if __name__ == "__main__":
 	parser.add_argument("--do_train", action="store_true", help="Do training.")
 	parser.add_argument("--do_eval", action="store_true", help="Do eval and test.")
 	parser.add_argument("--with_crf", action="store_true", help="Use BiLSTM_CRF model.")
-	parser.add_argument("--batch_size", default=8, type=int, help="Batch size for training.")
-	parser.add_argument("--hidden_size", default=20, type=int, help="Hidden size for lstm.")
+	parser.add_argument("--batch_size", default=16, type=int, help="Batch size for training.")
+	parser.add_argument("--hidden_size", default=128, type=int, help="Hidden size for lstm.")
 	parser.add_argument("--num_of_tags", default=7, type=int, help="Number of meaningful tags.")
 	parser.add_argument(
-		"--num_train_epochs", default=50, type=float, help="Total number of training epochs to perform."
+		"--num_train_epochs", default=50, type=int, help="Total number of training epochs to perform."
 	)
 	parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
 	args = parser.parse_args()
